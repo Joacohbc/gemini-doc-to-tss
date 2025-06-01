@@ -76,8 +76,5 @@ Ejemplo de formato JSON de salida:
 ]
 ```
 
-**Documento a Analizar y Reescribir:**
-`[PEGAR AQUÍ EL TEXTO DEL DOCUMENTO ORIGINAL]`
-
 **Acción:**
 Procede con el análisis y la reescritura del documento según las directrices altamente específicas proporcionadas. Genera como salida final únicamente el array JSON de objetos formateado como se ha indicado.
