@@ -219,6 +219,9 @@ def main():
     parser.add_argument("test_name", help="Nombre de la prueba (se usará para generar el nombre del archivo de salida).")
     parser.add_argument("--api_key", help="Clave API de Gemini. También se puede configurar mediante la variable de entorno GEMINI_API_KEY.")
     parser.add_argument("--max_workers", type=int, default=5, help="Número máximo de hilos para procesamiento en paralelo.")
+    parser.add_argument("--model_name", default=MODEL_NAME, help=f"Nombre del modelo a usar (por defecto: {MODEL_NAME}).")
+    parser.add_argument("--voice_name", default=VOICE_NAME, help=f"Nombre de la voz a usar (por defecto: {VOICE_NAME}).")
+    parser.add_argument("--temperature", type=float, default=TEMPERATURE, help=f"Temperatura para la generación (por defecto: {TEMPERATURE}).")
     args = parser.parse_args()
 
     api_key_value = args.api_key or os.environ.get("GEMINI_API_KEY")
@@ -274,12 +277,12 @@ def main():
         return
 
     base_generate_content_config = types.GenerateContentConfig(
-        temperature=TEMPERATURE,
+        temperature=args.temperature,
         response_modalities=["audio"],
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
                 prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                    voice_name=VOICE_NAME
+                    voice_name=args.voice_name
                 )
             )
         ),
@@ -306,7 +309,7 @@ def main():
     print(f"Iniciando procesamiento de {len(texts_to_process)} textos con hasta {args.max_workers} hilos...")
     with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
         future_to_text = {
-            executor.submit(generate_audio_for_text, content, title, client, MODEL_NAME, base_generate_content_config, i, output_folder): (title, content)
+            executor.submit(generate_audio_for_text, content, title, client, args.model_name, base_generate_content_config, i, output_folder): (title, content)
             for i, (title, content) in enumerate(zip(titles_to_process, texts_to_process))
         }
 
