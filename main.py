@@ -113,6 +113,7 @@ def generate_audio_for_text(
     model_name: str,
     base_generate_config: types.GenerateContentConfig,
     text_index: int,
+    output_folder: str,
     max_retries: int = 3
 ) -> tuple[bytes | None, str | None]:
     """
@@ -172,11 +173,12 @@ def generate_audio_for_text(
                         clean_title = f"audio_{text_index + 1}"
                     
                     individual_filename = f"{clean_title}_{text_index + 1}.wav"
+                    individual_file_path = os.path.join(output_folder, individual_filename)
                     individual_wav_data = convert_to_wav(accumulated_audio_data, first_mime_type)
                     
-                    with open(individual_filename, "wb") as f:
+                    with open(individual_file_path, "wb") as f:
                         f.write(individual_wav_data)
-                    print(f"Archivo individual guardado: {individual_filename}")
+                    print(f"Archivo individual guardado: {individual_file_path}")
                     
                 except Exception as e:
                     log_error(f"Error al guardar archivo individual para '{title}' (índice {text_index + 1}): {e}")
@@ -285,10 +287,25 @@ def main():
     all_audio_segments_data = []
     first_valid_mime_type = None
 
+    # Crear carpeta para archivos individuales
+    try:
+        clean_test_name = re.sub(r'[<>:"/\\|?*]', '_', args.test_name)
+        clean_test_name = clean_test_name.strip()
+        if not clean_test_name:
+            clean_test_name = "audio_test"
+        
+        output_folder = f"{clean_test_name}_audios"
+        os.makedirs(output_folder, exist_ok=True)
+        print(f"Carpeta creada para archivos individuales: {output_folder}/")
+    except Exception as e:
+        print(f"Error al crear la carpeta para archivos individuales: {e}")
+        log_error(f"Error al crear la carpeta para archivos individuales: {e}")
+        output_folder = "."  # Usar directorio actual como fallback
+
     print(f"Iniciando procesamiento de {len(texts_to_process)} textos con hasta {args.max_workers} hilos...")
     with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
         future_to_text = {
-            executor.submit(generate_audio_for_text, content, title, client, MODEL_NAME, base_generate_content_config, i): (title, content)
+            executor.submit(generate_audio_for_text, content, title, client, MODEL_NAME, base_generate_content_config, i, output_folder): (title, content)
             for i, (title, content) in enumerate(zip(titles_to_process, texts_to_process))
         }
 
@@ -360,11 +377,12 @@ def main():
         print("\n=== RESUMEN DE ARCHIVOS GENERADOS ===")
         print(f"Archivo combinado: {output_filename}")
         print("Archivos individuales:")
-        individual_files = glob.glob("*_*.wav")
+        individual_files_pattern = os.path.join(output_folder, "*.wav")
+        individual_files = glob.glob(individual_files_pattern)
         for file in sorted(individual_files):
-            if file != output_filename:
-                print(f"  - {file}")
+            print(f"  - {file}")
         print(f"Total archivos individuales: {len(individual_files)}")
+        print(f"Carpeta de archivos individuales: {output_folder}/")
         
     except Exception as e:
         print("Error durante la conversión final a WAV o al guardar")
