@@ -16,6 +16,13 @@ from datetime import datetime
 from google import genai
 from google.genai import types
 
+
+# Parámetros del modelo y de generación (del script original)
+# Estos se usarán para cada llamada.
+MODEL_NAME = "gemini-2.5-flash-preview-tts"
+VOICE_NAME = "Zephyr"
+TEMPERATURE = 1
+
 # --- Funciones de Ayuda (directamente del script original del usuario) ---
 
 def log_error(message):
@@ -265,12 +272,6 @@ def main():
         print("Asegúrate de que la biblioteca 'google-genai' esté instalada y que la API key sea válida.")
         log_error(f"Error inicializando genai.Client: {e}")
         return
-
-    # Parámetros del modelo y de generación (del script original)
-    # Estos se usarán para cada llamada.
-    MODEL_NAME = "gemini-2.5-flash-preview-tts" # Del script original
-    VOICE_NAME = "Zephyr" # Del script original
-    TEMPERATURE = 1 # Del script original
 
     base_generate_content_config = types.GenerateContentConfig(
         temperature=TEMPERATURE,
