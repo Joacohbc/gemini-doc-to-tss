@@ -113,19 +113,64 @@ def convert_to_wav(audio_data: bytes, mime_type: str) -> bytes:
 
 # --- Lógica Modificada para los Requisitos ---
 
+def create_results_file(filename: str, successful_ids: list, failed_ids: list, target_ids: set = None):
+    """
+    Crea un archivo de texto con los resultados del procesamiento.
+    """
+    try:
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write("=== RESULTADOS DEL PROCESAMIENTO DE AUDIO ===\n")
+            f.write(f"Fecha y hora: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            
+            if target_ids:
+                f.write(f"IDs solicitados para procesar: {sorted(target_ids)}\n")
+                f.write(f"Total IDs solicitados: {len(target_ids)}\n\n")
+            else:
+                f.write("Modo: Procesar todos los IDs disponibles\n\n")
+            
+            f.write(f"IDs procesados exitosamente ({len(successful_ids)}):\n")
+            if successful_ids:
+                for id_item in sorted(successful_ids):
+                    f.write(f"  ✓ {id_item}\n")
+            else:
+                f.write("  (Ninguno)\n")
+            
+            f.write(f"\nIDs que fallaron ({len(failed_ids)}):\n")
+            if failed_ids:
+                for id_item in sorted(failed_ids):
+                    f.write(f"  ✗ {id_item}\n")
+            else:
+                f.write("  (Ninguno)\n")
+            
+            f.write(f"\nResumen:\n")
+            f.write(f"  Total procesados: {len(successful_ids) + len(failed_ids)}\n")
+            f.write(f"  Exitosos: {len(successful_ids)}\n")
+            f.write(f"  Fallidos: {len(failed_ids)}\n")
+            
+            if len(successful_ids) + len(failed_ids) > 0:
+                success_rate = (len(successful_ids) / (len(successful_ids) + len(failed_ids))) * 100
+                f.write(f"  Tasa de éxito: {success_rate:.1f}%\n")
+        
+        print(f"Archivo de resultados creado: {filename}")
+        
+    except Exception as e:
+        print(f"Error al crear archivo de resultados: {e}")
+        log_error(f"Error al crear archivo de resultados {filename}: {e}")
+
 def generate_audio_for_text(
     text_input: str,
     title: str,
+    item_id: str,
     client: genai.Client, # Usando genai.Client como en el script original
     model_name: str,
     base_generate_config: types.GenerateContentConfig,
     text_index: int,
     output_folder: str,
     max_retries: int = 3
-) -> tuple[bytes | None, str | None]:
+) -> tuple[bytes | None, str | None, bool]:
     """
     Genera un chunk de audio para un texto dado usando la estructura de API original.
-    Devuelve los bytes de audio crudos y el mime_type.
+    Devuelve los bytes de audio crudos, el mime_type y un booleano indicando éxito.
     Incluye sistema de reintentos con espera de 1 minuto en caso de fallo.
     """
     contents = [
@@ -141,7 +186,7 @@ def generate_audio_for_text(
         accumulated_audio_data = b""
         first_mime_type = None
         
-        print(f"Generando audio para: '{title}' - Intento {attempt + 1}/{max_retries}")
+        print(f"Generando audio para ID '{item_id}': '{title}' - Intento {attempt + 1}/{max_retries}")
         try:
             # Usando client.models.generate_content_stream como en el script original
             for chunk in client.models.generate_content_stream(
@@ -177,9 +222,9 @@ def generate_audio_for_text(
                     clean_title = re.sub(r'[<>:"/\\|?*]', '_', title)
                     clean_title = clean_title.strip()
                     if not clean_title:
-                        clean_title = f"audio_{text_index + 1}"
+                        clean_title = f"audio_{item_id}"
                     
-                    individual_filename = f"{clean_title}_{text_index + 1}.wav"
+                    individual_filename = f"{item_id}_{clean_title}.wav"
                     individual_file_path = os.path.join(output_folder, individual_filename)
                     individual_wav_data = convert_to_wav(accumulated_audio_data, first_mime_type)
                     
@@ -188,19 +233,19 @@ def generate_audio_for_text(
                     print(f"Archivo individual guardado: {individual_file_path}")
                     
                 except Exception as e:
-                    log_error(f"Error al guardar archivo individual para '{title}' (índice {text_index + 1}): {e}")
-                    print(f"Advertencia: No se pudo guardar el archivo individual para '{title}'")
+                    log_error(f"Error al guardar archivo individual para ID '{item_id}': '{title}': {e}")
+                    print(f"Advertencia: No se pudo guardar el archivo individual para ID '{item_id}': '{title}'")
                 
                 print(f"Esperando 5 segundos antes de la siguiente generación...")
                 time.sleep(5)
-                return accumulated_audio_data, first_mime_type
+                return accumulated_audio_data, first_mime_type, True
             else:
-                print(f"Advertencia: No se recibieron datos de audio para '{title}' en intento {attempt + 1}")
-                log_error(f"No se recibieron datos de audio para '{title}' (contenido: '{text_input[:30]}...') en intento {attempt + 1}")
+                print(f"Advertencia: No se recibieron datos de audio para ID '{item_id}': '{title}' en intento {attempt + 1}")
+                log_error(f"No se recibieron datos de audio para ID '{item_id}': '{title}' (contenido: '{text_input[:30]}...') en intento {attempt + 1}")
                 
         except Exception as e:
-            print(f"Error durante la llamada API para '{title}' en intento {attempt + 1}")
-            log_error(f"Error durante la llamada API para '{title}' (contenido: '{text_input[:30]}...') en intento {attempt + 1}: {e}")
+            print(f"Error durante la llamada API para ID '{item_id}': '{title}' en intento {attempt + 1}")
+            log_error(f"Error durante la llamada API para ID '{item_id}': '{title}' (contenido: '{text_input[:30]}...') en intento {attempt + 1}: {e}")
         
         # Si no es el último intento, esperar 1 minuto antes del siguiente intento
         if attempt < max_retries - 1:
@@ -208,15 +253,16 @@ def generate_audio_for_text(
             time.sleep(60)
     
     # Si llegamos aquí, todos los intentos fallaron
-    print(f"Error: No se pudo generar audio para '{title}' después de {max_retries} intentos")
-    log_error(f"Error: No se pudo generar audio para '{title}' (contenido: '{text_input[:30]}...') después de {max_retries} intentos")
-    return None, None
+    print(f"Error: No se pudo generar audio para ID '{item_id}': '{title}' después de {max_retries} intentos")
+    log_error(f"Error: No se pudo generar audio para ID '{item_id}': '{title}' (contenido: '{text_input[:30]}...') después de {max_retries} intentos")
+    return None, None, False
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Genera y combina audio desde textos en un JSON con formato [{'title': '', 'content': ''}], usando la estructura original de genai.Client.")
-    parser.add_argument("json_file", help="Ruta al archivo JSON que contiene un array de objetos con 'title' y 'content'.")
+    parser = argparse.ArgumentParser(description="Genera y combina audio desde textos en un JSON con formato [{'id': '', 'title': '', 'content': ''}], usando la estructura original de genai.Client.")
+    parser.add_argument("json_file", help="Ruta al archivo JSON que contiene un array de objetos con 'id', 'title' y 'content'.")
     parser.add_argument("test_name", help="Nombre de la prueba (se usará para generar el nombre del archivo de salida).")
+    parser.add_argument("--ids", nargs='*', help="IDs específicos a procesar. Si no se especifica, se procesan todos los IDs.")
     parser.add_argument("--api_key", help="Clave API de Gemini. También se puede configurar mediante la variable de entorno GEMINI_API_KEY.")
     parser.add_argument("--max_workers", type=int, default=5, help="Número máximo de hilos para procesamiento en paralelo.")
     parser.add_argument("--model_name", default=MODEL_NAME, help=f"Nombre del modelo a usar (por defecto: {MODEL_NAME}).")
@@ -240,25 +286,44 @@ def main():
         
         texts_to_process = []
         titles_to_process = []
+        ids_to_process = []
+        
+        # Determinar qué IDs procesar
+        target_ids = set(args.ids) if args.ids else None
         
         for i, item in enumerate(json_data):
             if not isinstance(item, dict):
-                print(f"Error: El elemento {i+1} debe ser un objeto con 'title' y 'content'.")
+                print(f"Error: El elemento {i+1} debe ser un objeto con 'id', 'title' y 'content'.")
                 return
             
-            if 'title' not in item or 'content' not in item:
-                print(f"Error: El elemento {i+1} debe tener las propiedades 'title' y 'content'.")
+            required_fields = ['id', 'title', 'content']
+            for field in required_fields:
+                if field not in item:
+                    print(f"Error: El elemento {i+1} debe tener la propiedad '{field}'.")
+                    return
+            
+            if not isinstance(item['id'], str) or not isinstance(item['title'], str) or not isinstance(item['content'], str):
+                print(f"Error: 'id', 'title' y 'content' del elemento {i+1} deben ser strings.")
                 return
             
-            if not isinstance(item['title'], str) or not isinstance(item['content'], str):
-                print(f"Error: 'title' y 'content' del elemento {i+1} deben ser strings.")
-                return
-            
-            texts_to_process.append(item['content'])
-            titles_to_process.append(item['title'])
+            # Solo procesar este item si su ID está en la lista target o si no se especificaron IDs
+            if target_ids is None or item['id'] in target_ids:
+                texts_to_process.append(item['content'])
+                titles_to_process.append(item['title'])
+                ids_to_process.append(item['id'])
+        
+        # Verificar si algunos IDs especificados no se encontraron
+        if target_ids:
+            found_ids = set(ids_to_process)
+            missing_ids = target_ids - found_ids
+            if missing_ids:
+                print(f"Advertencia: Los siguientes IDs no se encontraron en el JSON: {sorted(missing_ids)}")
         
         if not texts_to_process:
-            print("El archivo JSON está vacío o no contiene textos para procesar.")
+            if target_ids:
+                print("No se encontraron textos para procesar con los IDs especificados.")
+            else:
+                print("El archivo JSON está vacío o no contiene textos para procesar.")
             return
     except FileNotFoundError:
         print(f"Error: Archivo JSON no encontrado en {args.json_file}")
@@ -290,6 +355,8 @@ def main():
 
     all_audio_segments_data = []
     first_valid_mime_type = None
+    successful_ids = []
+    failed_ids = []
 
     # Crear carpeta para archivos individuales
     try:
@@ -308,34 +375,50 @@ def main():
 
     print(f"Iniciando procesamiento de {len(texts_to_process)} textos con hasta {args.max_workers} hilos...")
     with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
-        future_to_text = {
-            executor.submit(generate_audio_for_text, content, title, client, args.model_name, base_generate_content_config, i, output_folder): (title, content)
-            for i, (title, content) in enumerate(zip(titles_to_process, texts_to_process))
+        future_to_data = {
+            executor.submit(generate_audio_for_text, content, title, item_id, client, args.model_name, base_generate_content_config, i, output_folder): (item_id, title, content)
+            for i, (item_id, title, content) in enumerate(zip(ids_to_process, titles_to_process, texts_to_process))
         }
 
-        for i, future in enumerate(future_to_text):
-            title, content = future_to_text[future]
-            print(f"Esperando resultado para '{title}' ({i+1}/{len(texts_to_process)})")
+        for i, future in enumerate(future_to_data):
+            item_id, title, content = future_to_data[future]
+            print(f"Esperando resultado para ID '{item_id}': '{title}' ({i+1}/{len(texts_to_process)})")
             try:
-                audio_data, mime_type = future.result()
-                if audio_data and mime_type:
+                audio_data, mime_type, success = future.result()
+                if success and audio_data and mime_type:
                     all_audio_segments_data.append(audio_data)
+                    successful_ids.append(item_id)
                     if first_valid_mime_type is None:
                         first_valid_mime_type = mime_type
                     elif first_valid_mime_type != mime_type:
                         print(f"ADVERTENCIA: Discrepancia en el tipo MIME")
                         log_error(f"ADVERTENCIA: Discrepancia en el tipo MIME. Esperado {first_valid_mime_type}, obtenido {mime_type}. Se usará el primer tipo MIME ({first_valid_mime_type}) para el encabezado WAV. Esto podría generar un audio incorrecto si los formatos base no son compatibles.")
-                elif audio_data and not mime_type:
-                     print(f"Advertencia: Se recibieron datos de audio pero no mime_type para '{title}'")
-                     log_error(f"Advertencia: Se recibieron datos de audio pero no mime_type para '{title}'")
-                # else: Errores ya impresos en la función generate_audio_for_text
+                elif success and audio_data and not mime_type:
+                     print(f"Advertencia: Se recibieron datos de audio pero no mime_type para ID '{item_id}': '{title}'")
+                     log_error(f"Advertencia: Se recibieron datos de audio pero no mime_type para ID '{item_id}': '{title}'")
+                     successful_ids.append(item_id)
+                else:
+                    failed_ids.append(item_id)
 
             except Exception as exc:
-                print(f"Error al procesar '{title}' (fuera de la llamada API)")
-                log_error(f"Error al procesar '{title}' (fuera de la llamada API): {exc}")
+                print(f"Error al procesar ID '{item_id}': '{title}' (fuera de la llamada API)")
+                log_error(f"Error al procesar ID '{item_id}': '{title}' (fuera de la llamada API): {exc}")
+                failed_ids.append(item_id)
+
+    # Crear archivo de resultados incluso si no hay audio exitoso
+    try:
+        clean_test_name = re.sub(r'[<>:"/\\|?*]', '_', args.test_name)
+        clean_test_name = clean_test_name.strip()
+        if not clean_test_name:
+            clean_test_name = "audio_test"
+        results_filename = f"{clean_test_name}_resultados.txt"
+        create_results_file(results_filename, successful_ids, failed_ids, target_ids)
+    except Exception as e:
+        log_error(f"Error al crear archivo de resultados: {e}")
 
     if not all_audio_segments_data or first_valid_mime_type is None:
-        print("No se generaron datos de audio con éxito o no se pudo determinar el tipo MIME. Saliendo.")
+        print("No se generaron datos de audio con éxito o no se pudo determinar el tipo MIME.")
+        print(f"IDs exitosos: {len(successful_ids)}, IDs fallidos: {len(failed_ids)}")
         return
 
     print("Concatenando todos los segmentos de audio...")
@@ -376,6 +459,10 @@ def main():
             
         save_binary_file(output_filename, final_wav_data)
         print(f"Audio combinado guardado exitosamente en {output_filename}")
+        
+        # Crear archivo de resultados con el mismo nombre base
+        results_filename = f"{clean_test_name}_resultados.txt"
+        create_results_file(results_filename, successful_ids, failed_ids, target_ids)
         
         # Mostrar resumen de archivos generados
         print("\n=== RESUMEN DE ARCHIVOS GENERADOS ===")
