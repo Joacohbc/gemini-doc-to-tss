@@ -1,3 +1,4 @@
 *.wav
 input.json
 logs.txt
+run.sh
